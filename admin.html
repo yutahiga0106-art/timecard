@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>出退勤 管理者</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; background: #f4f6f8; color: #222; font-size: 15px; }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 8px 0 12px; }
+  h2 { font-size: 17px; margin: 24px 0 8px; border-left: 4px solid #1e88e5; padding-left: 8px; }
+  input, select, button { font-size: 16px; padding: 8px 10px; border-radius: 8px; border: 1px solid #bbb; }
+  button { background: #fff; cursor: pointer; }
+  button.primary { background: #1e88e5; color: #fff; border-color: #1e88e5; }
+  button.danger { color: #b71c1c; border-color: #b71c1c; }
+  button.small { font-size: 13px; padding: 4px 8px; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .msg { margin: 10px 0; padding: 10px; border-radius: 8px; display: none; white-space: pre-line; }
+  .msg.show { display: block; }
+  .msg.err { background: #fde2e2; color: #b71c1c; }
+  .msg.ok { background: #e3f4e6; color: #1b5e20; }
+  .msg.info { background: #e8eef6; }
+  .scroll { overflow-x: auto; background: #fff; border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  th, td { border-bottom: 1px solid #e3e3e3; padding: 7px 8px; text-align: left; white-space: nowrap; }
+  th { background: #eef2f6; font-size: 13px; }
+  td.num { text-align: right; }
+  tr.total td { font-weight: bold; background: #f7f9fb; }
+  tr.click { cursor: pointer; }
+  tr.click:hover { background: #f5f9ff; }
+  tr.alert td { background: #fdecea; color: #b71c1c; }
+  tr.canceled td { color: #999; text-decoration: line-through; }
+  tr.canceled td.ops, tr.canceled td.st { text-decoration: none; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; background: #fff3cd; color: #7a4f00; margin-left: 4px; text-decoration: none; }
+  .red { color: #b71c1c; font-weight: bold; }
+  .detail { margin: 6px 0 14px; }
+  .detail td { font-size: 14px; white-space: normal; }
+  .ops { display: flex; gap: 4px; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal[hidden] { display: none; }
+  .dialog { background: #fff; border-radius: 14px; padding: 20px; width: 100%; max-width: 420px; }
+  .dialog h3 { margin: 0 0 12px; font-size: 18px; }
+  .dialog label { display: block; font-size: 13px; color: #555; margin: 10px 0 4px; }
+  .dialog input, .dialog select { width: 100%; }
+  .dbtns { display: flex; gap: 10px; margin-top: 18px; }
+  .dbtns button { flex: 1; }
+  .note { font-size: 13px; color: #666; }
+</style>
+</head>
+<body>
+<main>
+  <section id="loginView">
+    <h1>出退勤 管理者画面</h1>
+    <div class="bar">
+      <input id="pw" type="password" placeholder="管理者パスワード">
+      <button id="btnLogin" class="primary">ログイン</button>
+    </div>
+    <div class="msg" id="loginMsg"></div>
+  </section>
+
+  <section id="mainView" hidden>
+    <h1>出退勤 管理者画面</h1>
+    <div class="bar">
+      <input id="month" type="month">
+      <button id="btnLoad" class="primary">表示</button>
+    </div>
+    <div class="msg" id="msg"></div>
+
+    <h2>月別集計</h2>
+    <p class="note">行をタップすると、その講師の日別の勤務が表示されます。赤い行は要確認です。</p>
+    <div class="scroll"><table id="summary"></table></div>
+    <div id="detail"></div>
+
+    <h2>打刻一覧（修正・追加・取消）</h2>
+    <div class="bar" style="margin-bottom:8px">
+      <button id="btnAdd">＋ 打刻を追加</button>
+      <label class="note"><input type="checkbox" id="showCanceled" checked> 取消も表示</label>
+    </div>
+    <div class="scroll"><table id="punches"></table></div>
+  </section>
+</main>
+
+<div class="modal" id="modal" hidden>
+  <div class="dialog">
+    <h3 id="mTitle"></h3>
+    <div id="mInfo" class="note"></div>
+    <div id="mNameWrap"><label for="mName">講師</label><select id="mName"></select></div>
+    <div id="mDtWrap"><label for="mDt">日時</label><input id="mDt" type="datetime-local"></div>
+    <div id="mTypeWrap"><label for="mType">種別</label>
+      <select id="mType"><option>出勤</option><option>退勤</option></select></div>
+    <label for="mReason">理由（必須・修正履歴に残ります）</label>
+    <input id="mReason" type="text" placeholder="例：退勤の押し忘れ">
+    <div class="msg" id="mMsg"></div>
+    <div class="dbtns">
+      <button id="mCancel">やめる</button>
+      <button id="mOk" class="primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let password = '';
+let data = null;
+let openName = '';
+
+// Apps Script 上で開いたときは google.script.run、GitHub Pages などで開いたときは API_URL へ送る
+const API_URL = 'https://script.google.com/macros/s/AKfycbzGpsuCEXjnCk6QQf5hMlk8x1WkafuC_36YFgBbdjuq7uhLhCPgxW13KilMiBVYVJi4/exec';
+function call(fn, ...args) {
+  if (window.google && google.script && google.script.run) {
+    return new Promise((resolve, reject) => {
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args);
+    });
+  }
+  return fetch(API_URL, { method: 'POST', body: JSON.stringify({ fn: fn, args: args }) })
+    .then(r => r.json(), () => { throw new Error('通信できませんでした。電波の良い場所でもう一度お試しください'); })
+    .then(r => { if (!r.ok) throw new Error(r.error); return r.result; });
+}
+function errText(e) { return String((e && e.message) || e).replace(/^(Exception|Error):\s*/, ''); }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function showMsg(text, kind) { $('msg').textContent = text; $('msg').className = 'msg show ' + (kind || 'info'); }
+function hm(min) { return Math.floor(min / 60) + '時間' + ('0' + (min % 60)).slice(-2) + '分'; }
+function yen(n) { return n.toLocaleString('ja-JP') + '円'; }
+
+async function login() {
+  const pw = $('pw').value;
+  $('btnLogin').disabled = true;
+  try {
+    const r = await call('adminLogin', pw);
+    password = pw;
+    $('loginView').hidden = true;
+    $('mainView').hidden = false;
+    $('month').value = r.month;
+    load();
+  } catch (e) {
+    $('loginMsg').textContent = errText(e);
+    $('loginMsg').className = 'msg show err';
+  } finally {
+    $('btnLogin').disabled = false;
+  }
+}
+
+async function load() {
+  showMsg('読み込み中…', 'info');
+  try {
+    data = await call('adminGetMonth', password, $('month').value);
+    $('msg').className = 'msg';
+    render();
+  } catch (e) {
+    showMsg(errText(e), 'err');
+  }
+}
+
+function render() {
+  // 月別集計
+  let html = '<tr><th>講師</th><th>出勤日数</th><th>勤務時間</th><th>時給</th><th>給与</th><th>要確認</th></tr>';
+  let totalMin = 0, totalPay = 0;
+  data.summary.forEach(s => {
+    totalMin += s.minutes;
+    totalPay += s.pay;
+    html += '<tr class="click' + (s.alertCount ? ' alert' : '') + '" data-name="' + esc(s.name) + '">'
+      + '<td>' + esc(s.name) + (s.registered ? '' : '<span class="badge">講師シートに未登録</span>') + '</td>'
+      + '<td class="num">' + s.days + '日</td>'
+      + '<td class="num">' + hm(s.minutes) + '</td>'
+      + '<td class="num">' + yen(s.wage) + '</td>'
+      + '<td class="num">' + yen(s.pay) + '</td>'
+      + '<td class="num">' + (s.alertCount ? s.alertCount + '件' : '') + '</td></tr>';
+  });
+  html += '<tr class="total"><td>合計</td><td></td><td class="num">' + hm(totalMin) + '</td><td></td><td class="num">' + yen(totalPay) + '</td><td></td></tr>';
+  $('summary').innerHTML = html;
+  $('summary').querySelectorAll('tr.click').forEach(tr => {
+    tr.onclick = () => { openName = openName === tr.dataset.name ? '' : tr.dataset.name; renderDetail(); };
+  });
+  renderDetail();
+  renderPunches();
+}
+
+function renderDetail() {
+  const s = data.summary.find(x => x.name === openName);
+  if (!s) { $('detail').innerHTML = ''; return; }
+  let html = '<h2>' + esc(s.name) + ' さんの勤務（' + esc($('month').value) + '）</h2>'
+    + '<div class="scroll detail"><table><tr><th>日付</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>注意</th></tr>';
+  if (!s.shifts.length) html += '<tr><td colspan="5">勤務の記録がありません</td></tr>';
+  s.shifts.forEach(x => {
+    html += '<tr' + (x.alerts.length ? ' class="alert"' : '') + '>'
+      + '<td>' + esc(x.date) + (x.edited ? '<span class="badge">修正済み</span>' : '') + '</td>'
+      + '<td>' + esc(x.inTime || '—') + '</td>'
+      + '<td>' + esc(x.outTime || (x.issue === '勤務中' ? '勤務中' : '—')) + '</td>'
+      + '<td class="num">' + (x.inTime && x.outTime ? hm(x.minutes) : '') + '</td>'
+      + '<td>' + x.alerts.map(esc).join('<br>') + '</td></tr>';
+  });
+  $('detail').innerHTML = html + '</table></div>';
+}
+
+function renderPunches() {
+  const showCanceled = $('showCanceled').checked;
+  let html = '<tr><th>日付</th><th>時刻</th><th>講師</th><th>種別</th><th>状態</th><th>操作</th></tr>';
+  const list = data.punches.filter(p => showCanceled || p.status !== '取消');
+  if (!list.length) html += '<tr><td colspan="6">この月の打刻はありません</td></tr>';
+  list.forEach(p => {
+    const canceled = p.status === '取消';
+    html += '<tr' + (canceled ? ' class="canceled"' : '') + '>'
+      + '<td>' + esc(p.date) + '</td><td>' + esc(p.time) + '</td><td>' + esc(p.name) + '</td><td>' + esc(p.type) + '</td>'
+      + '<td class="st">' + esc(p.status) + (p.edited ? '<span class="badge">' + esc(p.edited) + '</span>' : '') + '</td>'
+      + '<td class="ops">'
+      + (canceled
+        ? '<button class="small" data-op="restore" data-id="' + esc(p.id) + '">元に戻す</button>'
+        : '<button class="small" data-op="edit" data-id="' + esc(p.id) + '">修正</button>'
+          + '<button class="small danger" data-op="cancel" data-id="' + esc(p.id) + '">取消</button>')
+      + '</td></tr>';
+  });
+  $('punches').innerHTML = html;
+  $('punches').querySelectorAll('button[data-op]').forEach(b => {
+    b.onclick = () => openModal(b.dataset.op, data.punches.find(p => p.id === b.dataset.id));
+  });
+}
+
+/** op: add / edit / cancel / restore */
+function openModal(op, p) {
+  const titles = { add: '打刻を追加', edit: '打刻を修正', cancel: '打刻を取消', restore: '取消を元に戻す' };
+  const done = { add: '打刻を追加しました', edit: '打刻を修正しました', cancel: '打刻を取消しました', restore: '取消を元に戻しました' };
+  const modalMsg = t => { $('mMsg').textContent = t; $('mMsg').className = t ? 'msg show err' : 'msg'; };
+  modalMsg('');
+  $('mTitle').textContent = titles[op];
+  $('mInfo').textContent = p ? p.date + ' ' + p.time + ' ' + p.name + ' ' + p.type : '';
+  $('mNameWrap').hidden = op !== 'add';
+  $('mDtWrap').hidden = $('mTypeWrap').hidden = !(op === 'add' || op === 'edit');
+  $('mReason').value = '';
+  if (op === 'add') {
+    $('mName').innerHTML = '';
+    data.teachers.forEach(n => $('mName').add(new Option(n, n)));
+    if (openName && data.teachers.indexOf(openName) >= 0) $('mName').value = openName;
+    $('mDt').value = $('month').value + '-01T21:00';
+    $('mType').value = '退勤';
+  } else if (op === 'edit') {
+    $('mDt').value = p.dt;
+    $('mType').value = p.type;
+  }
+  $('mOk').textContent = op === 'cancel' ? '取消する' : '保存';
+  $('mOk').className = op === 'cancel' ? 'danger' : 'primary';
+  $('modal').hidden = false;
+
+  $('mCancel').onclick = () => { $('modal').hidden = true; };
+  $('mOk').onclick = async () => {
+    const reason = $('mReason').value.trim();
+    if (!reason) { modalMsg('理由を入力してください'); return; }
+    $('mOk').disabled = true;
+    try {
+      if (op === 'add') await call('adminAddPunch', password, $('mName').value, $('mDt').value, $('mType').value, reason);
+      if (op === 'edit') await call('adminUpdatePunch', password, p.id, $('mDt').value, $('mType').value, reason);
+      if (op === 'cancel') await call('adminSetStatus', password, p.id, '取消', reason);
+      if (op === 'restore') await call('adminSetStatus', password, p.id, '有効', reason);
+      $('modal').hidden = true;
+      await load();
+      showMsg(done[op] + '（修正履歴シートに記録しました）', 'ok');
+    } catch (e) {
+      modalMsg(errText(e));
+    } finally {
+      $('mOk').disabled = false;
+    }
+  };
+}
+
+$('btnLogin').onclick = login;
+$('pw').onkeydown = e => { if (e.key === 'Enter') login(); };
+$('btnLoad').onclick = load;
+$('month').onchange = load;
+$('showCanceled').onchange = renderPunches;
+$('btnAdd').onclick = () => openModal('add', null);
+</script>
+</body>
+</html>
