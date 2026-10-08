@@ -169,20 +169,31 @@ function hm(min) { return Math.floor(min / 60) + '時間' + ('0' + (min % 60)).s
 function yen(n) { return n.toLocaleString('ja-JP') + '円'; }
 
 async function login() {
+  if ($('btnLogin').disabled) return;
   const pw = $('pw').value;
-  $('btnLogin').disabled = true;
+  if (!pw) {
+    $('loginMsg').textContent = 'パスワードを入力してください';
+    $('loginMsg').className = 'msg show err';
+    return;
+  }
+  $('btnLogin').disabled = $('pw').disabled = true;
+  $('btnLogin').textContent = 'ログイン中…';
+  $('loginMsg').textContent = 'ログインしています。そのままお待ちください（数秒〜20秒ほどかかることがあります）';
+  $('loginMsg').className = 'msg show info';
   try {
     const r = await call('adminLogin', pw);
     password = pw;
     $('loginView').hidden = true;
     $('mainView').hidden = false;
     $('month').value = r.month;
+    $('loginMsg').className = 'msg';
     load();
   } catch (e) {
     $('loginMsg').textContent = errText(e);
     $('loginMsg').className = 'msg show err';
   } finally {
-    $('btnLogin').disabled = false;
+    $('btnLogin').disabled = $('pw').disabled = false;
+    $('btnLogin').textContent = 'ログイン';
   }
 }
 
