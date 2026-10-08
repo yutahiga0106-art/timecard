@@ -23,6 +23,7 @@
   .msg.ok { background: #e3f4e6; color: #1b5e20; }
   .msg.info { background: #e8eef6; }
   .scroll { overflow-x: auto; background: #fff; border-radius: 8px; }
+  .loading .scroll, .loading #detail, .loading #btnAdd { opacity: .4; pointer-events: none; }
   table { border-collapse: collapse; width: 100%; background: #fff; }
   th, td { border-bottom: 1px solid #e3e3e3; padding: 7px 8px; text-align: left; white-space: nowrap; }
   th { background: #eef2f6; font-size: 13px; }
@@ -168,14 +169,21 @@ async function login() {
   }
 }
 
+// 読み込み中は表を薄くして操作できないようにする（古い表のまま二重に操作されるのを防ぐ）
+let loading = false;
 async function load() {
-  showMsg('読み込み中…', 'info');
+  loading = true;
+  $('mainView').classList.add('loading');
+  showMsg('読み込み中…（数秒〜20秒ほどかかることがあります）', 'info');
   try {
     data = await call('adminGetMonth', password, $('month').value);
     $('msg').className = 'msg';
     render();
   } catch (e) {
     showMsg(errText(e), 'err');
+  } finally {
+    loading = false;
+    $('mainView').classList.remove('loading');
   }
 }
 
@@ -245,9 +253,10 @@ function renderPunches() {
 
 /** op: add / edit / cancel / restore */
 function openModal(op, p) {
+  if (loading) return;
   const titles = { add: '打刻を追加', edit: '打刻を修正', cancel: '打刻を取消', restore: '取消を元に戻す' };
   const done = { add: '打刻を追加しました', edit: '打刻を修正しました', cancel: '打刻を取消しました', restore: '取消を元に戻しました' };
-  const modalMsg = t => { $('mMsg').textContent = t; $('mMsg').className = t ? 'msg show err' : 'msg'; };
+  const modalMsg = (t, kind) => { $('mMsg').textContent = t; $('mMsg').className = t ? 'msg show ' + (kind || 'err') : 'msg'; };
   modalMsg('');
   $('mTitle').textContent = titles[op];
   $('mInfo').textContent = p ? p.date + ' ' + p.time + ' ' + p.name + ' ' + p.type : '';
@@ -272,7 +281,10 @@ function openModal(op, p) {
   $('mOk').onclick = async () => {
     const reason = $('mReason').value.trim();
     if (!reason) { modalMsg('理由を入力してください'); return; }
-    $('mOk').disabled = true;
+    const okLabel = $('mOk').textContent;
+    $('mOk').disabled = $('mCancel').disabled = true;
+    $('mOk').textContent = '処理中…';
+    modalMsg('処理中です。画面を閉じずにお待ちください（数秒〜20秒ほどかかることがあります）', 'info');
     try {
       if (op === 'add') await call('adminAddPunch', password, $('mName').value, $('mDt').value, $('mType').value, reason);
       if (op === 'edit') await call('adminUpdatePunch', password, p.id, $('mDt').value, $('mType').value, reason);
@@ -284,7 +296,8 @@ function openModal(op, p) {
     } catch (e) {
       modalMsg(errText(e));
     } finally {
-      $('mOk').disabled = false;
+      $('mOk').disabled = $('mCancel').disabled = false;
+      $('mOk').textContent = okLabel;
     }
   };
 }
