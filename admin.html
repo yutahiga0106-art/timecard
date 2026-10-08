@@ -5,6 +5,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>サクラス 出退勤 管理者</title>
+<!-- ホーム画面・デスクトップに管理者用アプリとして追加するための設定（GitHub Pages 版で有効） -->
+<link rel="manifest" href="admin.webmanifest">
+<link rel="apple-touch-icon" href="admin-apple-touch-icon.png">
+<link rel="icon" href="admin-icon-192.png">
+<meta name="theme-color" content="#1a237e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="出退勤管理">
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; background: #f4f6f8; color: #222; font-size: 15px; }
@@ -342,6 +350,10 @@ $('btnAdd').onclick = () => openModal('add', null);
 $('mChips').querySelectorAll('button').forEach(b => {
   b.onclick = () => { $('mReason').value = b.textContent; };
 });
+// GitHub Pages 版のみ：アプリとして追加できるようにする
+if ('serviceWorker' in navigator && !window.google && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>
