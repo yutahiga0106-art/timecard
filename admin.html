@@ -31,6 +31,24 @@
   .msg.ok { background: #e3f4e6; color: #1b5e20; }
   .msg.info { background: #e8eef6; }
   .scroll { overflow-x: auto; background: #fff; border-radius: 8px; }
+  #printArea { display: none; }
+  @media print {
+    body { background: #fff; }
+    body > *:not(#printArea) { display: none !important; }
+    #printArea { display: block; }
+    @page { size: A4; margin: 15mm; }
+  }
+  .slip { font-size: 13px; color: #000; }
+  .slip h1 { font-size: 22px; text-align: center; margin: 0 0 4px; letter-spacing: 4px; }
+  .slip .sub { text-align: center; margin-bottom: 16px; }
+  .slip .head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; }
+  .slip .who { font-size: 18px; border-bottom: 1px solid #000; padding: 0 24px 2px 0; }
+  .slip table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  .slip th, .slip td { border: 1px solid #555; padding: 4px 8px; white-space: nowrap; }
+  .slip th { background: #eee; text-align: left; font-weight: bold; }
+  .slip td.num { text-align: right; }
+  .slip .total td { font-size: 16px; font-weight: bold; }
+  .slip .foot { font-size: 11px; color: #333; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   .chips button { font-size: 13px; padding: 5px 10px; border-radius: 16px; border-color: #f48fb1; color: #ad1457; background: #fff5f8; }
   .loading .scroll, .loading #detail, .loading #btnAdd { opacity: .4; pointer-events: none; }
@@ -82,6 +100,9 @@
     <h2>月別集計</h2>
     <p class="note">行をタップすると、その講師の日別の勤務が表示されます。赤い行は要確認です。</p>
     <div class="scroll"><table id="summary"></table></div>
+    <div class="bar" style="margin-top:8px">
+      <button id="btnSlipAll">全員分の給与明細をExcelで保存</button>
+    </div>
     <div id="detail"></div>
 
     <h2>打刻一覧（修正・追加・取消）</h2>
@@ -92,6 +113,9 @@
     <div class="scroll"><table id="punches"></table></div>
   </section>
 </main>
+
+<!-- 給与明細の印刷用（印刷するときだけ表示） -->
+<div id="printArea"></div>
 
 <div class="modal" id="modal" hidden>
   <div class="dialog">
@@ -243,6 +267,9 @@ function renderDetail() {
   const s = data.summary.find(x => x.name === openName);
   if (!s) { $('detail').innerHTML = ''; return; }
   let html = '<h2>' + esc(s.name) + ' さんの勤務（' + esc($('month').value) + '）</h2>'
+    + '<div class="bar" style="margin-bottom:8px">'
+    + '<button id="btnSlipPrint">給与明細を印刷・PDF保存</button>'
+    + '<button id="btnSlipXlsx">給与明細をExcelで保存</button></div>'
     + '<div class="scroll detail"><table><tr><th>日付</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>注意</th></tr>';
   if (!s.shifts.length) html += '<tr><td colspan="5">勤務の記録がありません</td></tr>';
   const kari = '<span class="badge">仮</span>';
@@ -260,6 +287,122 @@ function renderDetail() {
   $('detail').querySelectorAll('button[data-confirm]').forEach(b => {
     b.onclick = () => confirmProvisional(s.name, s.shifts[Number(b.dataset.confirm)]);
   });
+  $('btnSlipPrint').onclick = () => printSlip(s);
+  $('btnSlipXlsx').onclick = () => saveSlipsXlsx([s]);
+}
+
+// ───── 給与明細（勤務明細）の書き出し ─────
+// 支給額は額面（実打刻時間×時給、月合計を四捨五入）。控除は含まない。
+
+function monthLabel() {
+  const p = $('month').value.split('-');
+  return p[0] + '年' + Number(p[1]) + '月';
+}
+
+function slipNote(x) {
+  const n = [];
+  if (x.provisional) n.push(x.provisional + 'は時間割の時刻（仮）');
+  else if (x.issue && x.issue !== '勤務中') n.push(x.issue);
+  if (x.edited) n.push('修正済み');
+  return n.join('・');
+}
+
+/** 仮の時刻が残っていたら、書き出してよいか確認する */
+function okToExport(list) {
+  const kari = list.reduce((n, s) => n + s.shifts.filter(x => x.provisional || (x.issue && x.issue !== '勤務中')).length, 0);
+  if (!kari) return true;
+  return window.confirm('押し忘れなどで未確定の勤務が ' + kari + ' 件あります（時間割の時刻で仮に計算しています）。\nこのまま給与明細を出しますか？');
+}
+
+function slipHtml(s) {
+  const today = new Date();
+  let rows = '';
+  s.shifts.forEach(x => {
+    rows += '<tr><td>' + esc(x.date) + '</td><td>' + esc(x.inTime || '—') + '</td><td>' + esc(x.outTime || '—') + '</td>'
+      + '<td class="num">' + (x.inTime && x.outTime ? hm(x.minutes) : '') + '</td><td>' + esc(slipNote(x)) + '</td></tr>';
+  });
+  if (!rows) rows = '<tr><td colspan="5">勤務の記録がありません</td></tr>';
+  return '<div class="slip">'
+    + '<h1>給与明細</h1><div class="sub">' + esc(monthLabel()) + '分（勤務明細）</div>'
+    + '<div class="head"><div class="who">' + esc(s.name) + '　様</div>'
+    + '<div>サクラス<br>発行日：' + today.getFullYear() + '年' + (today.getMonth() + 1) + '月' + today.getDate() + '日</div></div>'
+    + '<table><tr><th>出勤日数</th><th>勤務時間合計</th><th>時給</th><th>支給額（額面）</th></tr>'
+    + '<tr class="total"><td class="num">' + s.days + '日</td><td class="num">' + hm(s.minutes) + '</td>'
+    + '<td class="num">' + yen(s.wage) + '</td><td class="num">' + yen(s.pay) + '</td></tr></table>'
+    + '<table><tr><th>日付</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>備考</th></tr>' + rows + '</table>'
+    + '<div class="foot">※ 勤務時間は打刻をもとに1分単位で計算し、支給額は月の合計時間×時給を円単位で四捨五入しています。<br>'
+    + '※ 源泉徴収などの控除は含みません。</div></div>';
+}
+
+function printSlip(s) {
+  if (!okToExport([s])) return;
+  $('printArea').innerHTML = slipHtml(s);
+  window.print();
+}
+
+/** Excel 書き出し用のライブラリ（SheetJS）を必要なときだけ読み込む */
+let xlsxReady = null;
+function loadXlsx() {
+  if (window.XLSX) return Promise.resolve();
+  if (!xlsxReady) {
+    xlsxReady = new Promise((resolve, reject) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      sc.onload = resolve;
+      sc.onerror = () => { xlsxReady = null; reject(new Error('Excel書き出しの準備に失敗しました。通信状況を確認してもう一度お試しください')); };
+      document.head.appendChild(sc);
+    });
+  }
+  return xlsxReady;
+}
+
+function slipSheet(s) {
+  const aoa = [
+    ['給与明細（勤務明細）'],
+    ['対象月', monthLabel()],
+    ['講師名', s.name],
+    [],
+    ['出勤日数', s.days],
+    ['勤務時間合計', hm(s.minutes)],
+    ['勤務時間合計（分）', s.minutes],
+    ['時給', s.wage],
+    ['支給額（額面）', s.pay],
+    [],
+    ['日付', '出勤', '退勤', '勤務時間', '勤務時間（分）', '備考'],
+  ];
+  s.shifts.forEach(x => {
+    const done = x.inTime && x.outTime;
+    aoa.push([x.date, x.inTime || '', x.outTime || '', done ? hm(x.minutes) : '', done ? x.minutes : '', slipNote(x)]);
+  });
+  aoa.push([], ['※ 支給額は月の合計時間×時給を円単位で四捨五入。源泉徴収などの控除は含みません。']);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 28 }];
+  return ws;
+}
+
+async function saveSlipsXlsx(list) {
+  list = list.filter(s => s.registered);
+  if (!list.length) return showMsg('出力する講師がいません', 'err');
+  if (!okToExport(list)) return;
+  try {
+    showMsg('Excelファイルを作っています…', 'info');
+    await loadXlsx();
+    const wb = XLSX.utils.book_new();
+    if (list.length > 1) {
+      const sum = [['対象月', monthLabel()], [], ['講師名', '出勤日数', '勤務時間合計', '勤務時間合計（分）', '時給', '支給額（額面）']];
+      list.forEach(s => sum.push([s.name, s.days, hm(s.minutes), s.minutes, s.wage, s.pay]));
+      sum.push(['合計', '', hm(list.reduce((a, s) => a + s.minutes, 0)), list.reduce((a, s) => a + s.minutes, 0), '', list.reduce((a, s) => a + s.pay, 0)]);
+      const ws = XLSX.utils.aoa_to_sheet(sum);
+      ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 8 }, { wch: 14 }];
+      XLSX.utils.book_append_sheet(wb, ws, '一覧');
+    }
+    list.forEach(s => XLSX.utils.book_append_sheet(wb, slipSheet(s), s.name.replace(/[\\\/\?\*\[\]:]/g, '').slice(0, 31) || '講師'));
+    const file = '給与明細_' + $('month').value + (list.length === 1 ? '_' + list[0].name : '_全員') + '.xlsx';
+    XLSX.writeFile(wb, file);
+    showMsg(file + ' を保存しました（ダウンロードフォルダ）', 'ok');
+  } catch (e) {
+    showMsg(errText(e), 'err');
+  }
 }
 
 /** 仮の時刻（時間割の時刻）を、そのまま打刻として追加して確定する */
@@ -358,6 +501,7 @@ $('btnLoad').onclick = load;
 $('month').onchange = load;
 $('showCanceled').onchange = renderPunches;
 $('btnAdd').onclick = () => openModal('add', null);
+$('btnSlipAll').onclick = () => { if (data) saveSlipsXlsx(data.summary); };
 $('mChips').querySelectorAll('button').forEach(b => {
   b.onclick = () => { $('mReason').value = b.textContent; };
 });
