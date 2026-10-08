@@ -37,6 +37,7 @@
   .msg.info { background: #e8eef6; color: #234; }
   .undo { margin-top: 12px; padding: 12px; border: 2px dashed #999; border-radius: 10px; background: #fff; text-align: center; }
   .undo button { margin-top: 8px; font-size: 18px; padding: 10px 24px; border-radius: 8px; border: 1px solid #b71c1c; color: #b71c1c; background: #fff; }
+  .missing { margin-top: 8px; padding: 10px; border-radius: 8px; background: #fde2e2; color: #b71c1c; font-size: 15px; white-space: pre-line; }
   .pending { margin-top: 12px; padding: 12px; border: 2px solid #f0b400; border-radius: 10px; background: #fffbea; }
   .pending-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 16px; }
   .pending-row button { font-size: 14px; padding: 6px 10px; border-radius: 8px; border: 1px solid #b71c1c; color: #b71c1c; background: #fff; }
@@ -60,6 +61,7 @@
   <label for="teacher">講師名</label>
   <select id="teacher"><option value="">読み込み中…</option></select>
   <div class="state" id="state"></div>
+  <div class="missing" id="missing" hidden></div>
 
 
   <div class="btns">
@@ -186,6 +188,7 @@ function tick() {
 
 function refreshStatus() {
   const name = $('teacher').value;
+  $('missing').hidden = true;
   if (!name) { $('state').textContent = '講師名を選んでください'; return; }
   $('state').textContent = '確認中…';
   call('getStatus', name).then(s => {
@@ -195,6 +198,12 @@ function refreshStatus() {
     b.textContent = '今日：' + s.state;
     $('state').appendChild(b);
     if (list) $('state').appendChild(document.createTextNode('（' + list + '）'));
+    // 前の日の押し忘れを知らせる（管理者が直すと消える）
+    const miss = s.missing || [];
+    $('missing').hidden = !miss.length;
+    $('missing').textContent = miss.map(m => '⚠ ' + m.date + ' の' + m.type + 'が押されていません'
+      + (m.type === '退勤' ? '（出勤 ' + m.time + '）' : '（退勤 ' + m.time + '）')).join('\n')
+      + '\n実際の' + (miss.every(m => m.type === '退勤') ? '退勤' : '') + '時刻を管理者に伝えてください。';
   }).catch(e => { $('state').textContent = errText(e); });
 }
 

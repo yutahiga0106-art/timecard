@@ -226,15 +226,38 @@ function renderDetail() {
   let html = '<h2>' + esc(s.name) + ' さんの勤務（' + esc($('month').value) + '）</h2>'
     + '<div class="scroll detail"><table><tr><th>日付</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>注意</th></tr>';
   if (!s.shifts.length) html += '<tr><td colspan="5">勤務の記録がありません</td></tr>';
-  s.shifts.forEach(x => {
+  const kari = '<span class="badge">仮</span>';
+  s.shifts.forEach((x, i) => {
     html += '<tr' + (x.alerts.length ? ' class="alert"' : '') + '>'
       + '<td>' + esc(x.date) + (x.edited ? '<span class="badge">修正済み</span>' : '') + '</td>'
-      + '<td>' + esc(x.inTime || '—') + '</td>'
-      + '<td>' + esc(x.outTime || (x.issue === '勤務中' ? '勤務中' : '—')) + '</td>'
+      + '<td>' + esc(x.inTime || '—') + (x.provisional === '出勤' ? kari : '') + '</td>'
+      + '<td>' + esc(x.outTime || (x.issue === '勤務中' ? '勤務中' : '—')) + (x.provisional === '退勤' ? kari : '') + '</td>'
       + '<td class="num">' + (x.inTime && x.outTime ? hm(x.minutes) : '') + '</td>'
-      + '<td>' + x.alerts.map(esc).join('<br>') + '</td></tr>';
+      + '<td>' + x.alerts.map(esc).join('<br>')
+      + (x.provisional ? '<br><button class="small primary" data-confirm="' + i + '">この時刻で確定</button>' : '')
+      + '</td></tr>';
   });
   $('detail').innerHTML = html + '</table></div>';
+  $('detail').querySelectorAll('button[data-confirm]').forEach(b => {
+    b.onclick = () => confirmProvisional(s.name, s.shifts[Number(b.dataset.confirm)]);
+  });
+}
+
+/** 仮の時刻（時間割の時刻）を、そのまま打刻として追加して確定する */
+async function confirmProvisional(name, x) {
+  if (loading) return;
+  const t = x.provisionalDt.slice(11);
+  if (!window.confirm(name + ' さんの ' + x.date + ' の' + x.provisional + 'を ' + t + ' で確定しますか？')) return;
+  showMsg('処理中です（数秒〜20秒ほどかかることがあります）', 'info');
+  $('mainView').classList.add('loading');
+  try {
+    await call('adminAddPunch', password, name, x.provisionalDt, x.provisional, x.provisional + 'の押し忘れ（時間割の時刻で確定）');
+    await load();
+    showMsg(x.date + ' の' + x.provisional + 'を ' + t + ' で確定しました（修正履歴シートに記録しました）', 'ok');
+  } catch (e) {
+    $('mainView').classList.remove('loading');
+    showMsg(errText(e), 'err');
+  }
 }
 
 function renderPunches() {
