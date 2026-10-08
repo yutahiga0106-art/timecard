@@ -49,8 +49,6 @@
   <select id="teacher"><option value="">読み込み中…</option></select>
   <div class="state" id="state"></div>
 
-  <label for="pin">PIN（4桁）</label>
-  <input id="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
 
   <div class="btns">
     <button id="btnIn" class="in">出勤</button>
@@ -68,10 +66,6 @@
 <div class="modal" id="modal" hidden>
   <div class="dialog">
     <p id="modalText"></p>
-    <div id="modalPinWrap" hidden>
-      <label for="modalPin">PIN（4桁）</label>
-      <input id="modalPin" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
-    </div>
     <div class="dbtns">
       <button id="modalCancel">やめる</button>
       <button id="modalOk">OK</button>
@@ -143,20 +137,17 @@ function setBusy(b) {
   $('btnUndo').disabled = b;
 }
 
-/** 確認ダイアログ。needPin のときは入力されたPIN（文字列）、やめたときは false を返す */
-function ask(text, needPin) {
+/** 確認ダイアログ。OKなら true、やめたら false を返す */
+function ask(text) {
   return new Promise(resolve => {
     $('modalText').textContent = text;
-    $('modalPinWrap').hidden = !needPin;
-    $('modalPin').value = '';
     $('modal').hidden = false;
-    if (needPin) $('modalPin').focus();
     const close = v => {
       $('modal').hidden = true;
       $('modalOk').onclick = $('modalCancel').onclick = null;
       resolve(v);
     };
-    $('modalOk').onclick = () => close(needPin ? $('modalPin').value.trim() : true);
+    $('modalOk').onclick = () => close(true);
     $('modalCancel').onclick = () => close(false);
   });
 }
@@ -184,16 +175,13 @@ function refreshStatus() {
 
 async function doPunch(type) {
   const name = $('teacher').value;
-  const pin = $('pin').value.trim();
   if (!name) return showMsg('講師名を選んでください', 'err');
-  if (!/^\d{4}$/.test(pin)) return showMsg('PINを4桁の数字で入力してください', 'err');
   if (!await ask(name + 'さん、\n' + type + 'でよろしいですか？')) return;
 
   setBusy(true);
   showMsg('送信中…', 'info');
   try {
-    const r = await call('punch', name, pin, type);
-    $('pin').value = '';
+    const r = await call('punch', name, type);
     showMsg(type + 'しました（' + r.time + '）' + (r.alert ? '\n⚠ ' + r.alert : ''), r.alert ? 'warn' : 'ok');
     undo = { id: r.id, name: name, type: type, time: r.time, until: r.undoUntil };
     store.set('undo', JSON.stringify(undo));
@@ -229,14 +217,12 @@ function renderUndo() {
 async function doUndo() {
   if (!undo) return;
   const u = undo;
-  const pin = await ask(u.time + ' の' + u.type + 'を取り消します。\nPINを入力してください。', true);
-  if (pin === false) return;
-  if (!/^\d{4}$/.test(pin)) return showMsg('PINを4桁の数字で入力してください', 'err');
+  if (!await ask(u.time + ' の' + u.type + 'を取り消してよろしいですか？')) return;
 
   setBusy(true);
   showMsg('取り消し中…', 'info');
   try {
-    await call('cancelPunch', u.name, pin, u.id);
+    await call('cancelPunch', u.name, u.id);
     showMsg(u.time + ' の' + u.type + 'を取り消しました', 'ok');
     undo = null;
     store.del('undo');
