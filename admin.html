@@ -23,6 +23,8 @@
   .msg.ok { background: #e3f4e6; color: #1b5e20; }
   .msg.info { background: #e8eef6; }
   .scroll { overflow-x: auto; background: #fff; border-radius: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chips button { font-size: 13px; padding: 5px 10px; border-radius: 16px; border-color: #f48fb1; color: #ad1457; background: #fff5f8; }
   .loading .scroll, .loading #detail, .loading #btnAdd { opacity: .4; pointer-events: none; }
   table { border-collapse: collapse; width: 100%; background: #fff; }
   th, td { border-bottom: 1px solid #e3e3e3; padding: 7px 8px; text-align: left; white-space: nowrap; }
@@ -91,8 +93,15 @@
     <div id="mDtWrap"><label for="mDt">日時</label><input id="mDt" type="datetime-local"></div>
     <div id="mTypeWrap"><label for="mType">種別</label>
       <select id="mType"><option>出勤</option><option>退勤</option></select></div>
-    <label for="mReason">理由（必須・修正履歴に残ります）</label>
-    <input id="mReason" type="text" placeholder="例：退勤の押し忘れ">
+    <label for="mReason">理由（任意・修正履歴に残ります）</label>
+    <div class="chips" id="mChips">
+      <button type="button">退勤の押し忘れ</button>
+      <button type="button">出勤の押し忘れ</button>
+      <button type="button">押し間違い</button>
+      <button type="button">時刻の修正</button>
+      <button type="button">テスト</button>
+    </div>
+    <input id="mReason" type="text" placeholder="ボタンで選ぶか、自由に入力（空欄でも可）">
     <div class="msg" id="mMsg"></div>
     <div class="dbtns">
       <button id="mCancel">やめる</button>
@@ -280,7 +289,6 @@ function openModal(op, p) {
   $('mCancel').onclick = () => { $('modal').hidden = true; };
   $('mOk').onclick = async () => {
     const reason = $('mReason').value.trim();
-    if (!reason) { modalMsg('理由を入力してください'); return; }
     const okLabel = $('mOk').textContent;
     $('mOk').disabled = $('mCancel').disabled = true;
     $('mOk').textContent = '処理中…';
@@ -308,6 +316,9 @@ $('btnLoad').onclick = load;
 $('month').onchange = load;
 $('showCanceled').onchange = renderPunches;
 $('btnAdd').onclick = () => openModal('add', null);
+$('mChips').querySelectorAll('button').forEach(b => {
+  b.onclick = () => { $('mReason').value = b.textContent; };
+});
 </script>
 </body>
 </html>
