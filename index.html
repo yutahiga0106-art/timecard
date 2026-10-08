@@ -5,6 +5,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>出退勤</title>
+<!-- ホーム画面に追加してアプリとして使うための設定（GitHub Pages 版で有効） -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#1e88e5">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="出退勤">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; background: #f4f6f8; color: #222; }
@@ -328,6 +336,10 @@ async function doUndo() {
 }
 
 function init() {
+  // GitHub Pages 版のみ：電波がなくても画面を開けるようにする
+  if ('serviceWorker' in navigator && !window.google && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
   tick();
   setInterval(tick, 1000);
   try { undo = JSON.parse(store.get('undo') || 'null'); } catch (e) { undo = null; }
@@ -349,7 +361,17 @@ function init() {
     if (document.visibilityState === 'visible' && loadQueue().length) flushQueue();
   });
 
+  // 講師名の一覧はこの端末にも覚えておき、電波がないときはそれを使う
   call('getTeachers').then(names => {
+    store.set('teachers', JSON.stringify(names));
+    return names;
+  }, e => {
+    let saved = null;
+    try { saved = JSON.parse(store.get('teachers') || 'null'); } catch (x) {}
+    if (!saved) throw e;
+    showMsg('電波が悪いため、保存してある講師名を表示しています。打刻はこのスマホに保存して、あとで自動で送ります。', 'warn');
+    return saved;
+  }).then(names => {
     const sel = $('teacher');
     sel.innerHTML = '';
     sel.add(new Option('選んでください', ''));
