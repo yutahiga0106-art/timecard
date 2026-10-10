@@ -284,7 +284,7 @@ function registerRoom() {
 function render() {
   renderRoom();
   // 月別集計
-  let html = '<tr><th>講師</th><th>出勤日数</th><th>勤務時間</th><th>時給</th><th>給与</th><th>要確認</th></tr>';
+  let html = '<tr><th>講師</th><th>出勤日数</th><th>累計勤務</th><th>時給</th><th>給与</th><th>要確認</th></tr>';
   let totalMin = 0, totalPay = 0;
   data.summary.forEach(s => {
     totalMin += s.minutes;
