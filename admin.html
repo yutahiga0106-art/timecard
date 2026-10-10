@@ -303,6 +303,7 @@ function slipNote(x) {
   const n = [];
   if (x.provisional) n.push(x.provisional + 'は時間割の時刻（仮）');
   else if (x.issue && x.issue !== '勤務中') n.push(x.issue);
+  if (x.payNote) n.push(x.payNote);
   if (x.edited) n.push('修正済み');
   return n.join('・');
 }
