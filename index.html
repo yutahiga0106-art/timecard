@@ -234,8 +234,12 @@ async function flushQueue() {
     let q = loadQueue();
     while (q.length) {
       const item = q[0];
+      // 位置情報を取得中の打刻は、取得が終わるまで（最大30秒）送らない
+      if (item.ready === false && Date.now() - item.at < 30000) return;
       try {
-        const r = await call('punch', item.name, item.type, item.at, item.id);
+        const r = await call('punch', item.name, item.type, item.at, item.id, {
+          device: deviceId(), lat: item.lat, lng: item.lng, acc: item.acc, locErr: item.locErr,
+        });
         showMsg(item.name + 'さん　' + item.type + 'しました（' + r.time + '）' + (r.alert ? '\n⚠ ' + r.alert : ''), r.alert ? 'warn' : 'ok');
         undo = { id: r.id, name: item.name, type: item.type, time: r.time, until: r.undoUntil };
         store.set('undo', JSON.stringify(undo));
@@ -293,14 +297,39 @@ async function doPunch(type) {
 
   const at = Date.now();
   const id = at.toString(36) + Math.random().toString(36).slice(2, 8);
-  saveQueue(loadQueue().concat([{ id: id, name: name, type: type, at: at }]));
-  showMsg('送信中…（' + hhmm(at) + ' の' + type + 'として記録します）', 'info');
+  // 時刻はこの時点で確定してスマホに保存し、位置情報は取れたら付け足してから送る
+  saveQueue(loadQueue().concat([{ id: id, name: name, type: type, at: at, ready: false }]));
   setBusy(true);
   try {
+    showMsg('位置情報を確認しています…（' + hhmm(at) + ' の' + type + 'として記録します）', 'info');
+    const loc = await getLocation();
+    saveQueue(loadQueue().map(x => x.id === id ? Object.assign(x, loc, { ready: true }) : x));
+    showMsg('送信中…（' + hhmm(at) + ' の' + type + 'として記録します）', 'info');
     await flushQueue();
   } finally {
     setBusy(false);
   }
+}
+
+/** この端末を見分けるための番号（初回に作ってスマホに保存。個人情報は含まない） */
+function deviceId() {
+  let d = store.get('deviceId');
+  if (!d) {
+    d = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    store.set('deviceId', d);
+  }
+  return d;
+}
+
+/** 打刻した場所（教室で押したかの確認用）。取れなくても打刻は止めない */
+function getLocation() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) return resolve({ locErr: 'この端末では使えません' });
+    navigator.geolocation.getCurrentPosition(
+      p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy) }),
+      e => resolve({ locErr: e.code === 1 ? '許可されていません' : e.code === 3 ? '時間切れ' : '取得できませんでした' }),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+  });
 }
 
 function renderUndo() {

@@ -31,6 +31,7 @@
   .msg.ok { background: #e3f4e6; color: #1b5e20; }
   .msg.info { background: #e8eef6; }
   .scroll { overflow-x: auto; background: #fff; border-radius: 8px; }
+  td.checks { white-space: normal; font-size: 13px; min-width: 160px; }
   #printArea { display: none; }
   @media print {
     body { background: #fff; }
@@ -111,6 +112,13 @@
       <label class="note"><input type="checkbox" id="showCanceled" checked> 取消も表示</label>
     </div>
     <div class="scroll"><table id="punches"></table></div>
+
+    <h2>教室の位置（不正防止）</h2>
+    <p class="note">教室で下のボタンを押すと、今いる場所を教室の位置として登録します。教室から離れた場所での打刻や、ほかの講師のスマホでの打刻は「要確認」に赤で表示されます（打刻自体は止めません）。許容距離は「設定」シートの「位置の許容距離(m)」で変えられます。</p>
+    <div id="roomInfo" class="note"></div>
+    <div class="bar" style="margin-top:8px">
+      <button id="btnRoom">今いる場所を教室の位置として登録</button>
+    </div>
   </section>
 </main>
 
@@ -239,7 +247,42 @@ async function load() {
   }
 }
 
+function renderRoom() {
+  const r = data.classroom;
+  $('roomInfo').innerHTML = r
+    ? '登録済み：<a href="https://www.google.com/maps?q=' + r.lat + ',' + r.lng + '" target="_blank" rel="noopener">地図で確認</a>'
+      + '（許容距離 ' + esc(r.radius) + 'm）'
+    : '<span class="red">まだ登録されていません（位置のチェックは行われていません）</span>';
+}
+
+/** 管理者が教室で押す：今いる場所を教室の位置として登録 */
+function registerRoom() {
+  if (loading) return;
+  if (!navigator.geolocation) return showMsg('この端末では位置情報が使えません', 'err');
+  showMsg('位置情報を確認しています…（許可を求められたら「許可」を押してください）', 'info');
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const acc = Math.round(pos.coords.accuracy);
+    if (!window.confirm('今いる場所（誤差 ±' + acc + 'm）を教室の位置として登録しますか？'
+      + (acc > 100 ? '\n※誤差が大きいので、窓の近くや屋外で押し直すと正確になります。' : ''))) {
+      $('msg').className = 'msg';
+      return;
+    }
+    showMsg('登録しています…', 'info');
+    try {
+      data.classroom = await call('adminSetClassroom', password, pos.coords.latitude, pos.coords.longitude, acc);
+      renderRoom();
+      await load();
+      showMsg('教室の位置を登録しました', 'ok');
+    } catch (e) {
+      showMsg(errText(e), 'err');
+    }
+  }, e => {
+    showMsg(e.code === 1 ? '位置情報が許可されていません。ブラウザの設定で許可してください' : '位置情報を取得できませんでした。もう一度お試しください', 'err');
+  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+}
+
 function render() {
+  renderRoom();
   // 月別集計
   let html = '<tr><th>講師</th><th>出勤日数</th><th>勤務時間</th><th>時給</th><th>給与</th><th>要確認</th></tr>';
   let totalMin = 0, totalPay = 0;
@@ -425,15 +468,19 @@ async function confirmProvisional(name, x) {
 
 function renderPunches() {
   const showCanceled = $('showCanceled').checked;
-  let html = '<tr><th>日付</th><th>時刻</th><th>講師</th><th>種別</th><th>状態</th><th>操作</th></tr>';
+  let html = '<tr><th>日付</th><th>時刻</th><th>講師</th><th>種別</th><th>状態</th><th>教室から</th><th>要確認</th><th>操作</th></tr>';
   // 新しい打刻を上に表示する（サーバーからは古い順に届く）
   const list = data.punches.filter(p => showCanceled || p.status !== '取消').slice().reverse();
-  if (!list.length) html += '<tr><td colspan="6">この月の打刻はありません</td></tr>';
+  if (!list.length) html += '<tr><td colspan="8">この月の打刻はありません</td></tr>';
   list.forEach(p => {
     const canceled = p.status === '取消';
-    html += '<tr' + (canceled ? ' class="canceled"' : '') + '>'
+    const checks = canceled ? [] : (p.checks || []);
+    const dist = p.distance === null || p.distance === undefined ? '' : p.distance >= 1000 ? (p.distance / 1000).toFixed(1) + 'km' : p.distance + 'm';
+    html += '<tr class="' + (canceled ? 'canceled' : '') + (checks.length ? ' alert' : '') + '">'
       + '<td>' + esc(p.date) + '</td><td>' + esc(p.time) + '</td><td>' + esc(p.name) + '</td><td>' + esc(p.type) + '</td>'
       + '<td class="st">' + esc(p.status) + (p.edited ? '<span class="badge">' + esc(p.edited) + '</span>' : '') + '</td>'
+      + '<td class="num">' + esc(dist) + '</td>'
+      + '<td class="checks">' + checks.map(esc).join('<br>') + '</td>'
       + '<td class="ops">'
       + (canceled
         ? '<button class="small" data-op="restore" data-id="' + esc(p.id) + '">元に戻す</button>'
@@ -504,6 +551,7 @@ $('month').onchange = load;
 $('showCanceled').onchange = renderPunches;
 $('btnAdd').onclick = () => openModal('add', null);
 $('btnSlipAll').onclick = () => { if (data) saveSlipsXlsx(data.summary); };
+$('btnRoom').onclick = registerRoom;
 $('mChips').querySelectorAll('button').forEach(b => {
   b.onclick = () => { $('mReason').value = b.textContent; };
 });
