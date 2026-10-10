@@ -426,7 +426,8 @@ async function confirmProvisional(name, x) {
 function renderPunches() {
   const showCanceled = $('showCanceled').checked;
   let html = '<tr><th>日付</th><th>時刻</th><th>講師</th><th>種別</th><th>状態</th><th>操作</th></tr>';
-  const list = data.punches.filter(p => showCanceled || p.status !== '取消');
+  // 新しい打刻を上に表示する（サーバーからは古い順に届く）
+  const list = data.punches.filter(p => showCanceled || p.status !== '取消').slice().reverse();
   if (!list.length) html += '<tr><td colspan="6">この月の打刻はありません</td></tr>';
   list.forEach(p => {
     const canceled = p.status === '取消';
