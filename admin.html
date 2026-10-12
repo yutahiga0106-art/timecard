@@ -113,6 +113,15 @@
     </div>
     <div class="scroll"><table id="punches"></table></div>
 
+    <h2>打刻用のパソコン（不正防止）</h2>
+    <p class="note">教室のパソコンでこの管理者画面を開き、「この端末を打刻用の端末として登録」を押すと、そのパソコンからしか打刻できなくなります（講師のスマホからの打刻は止まります）。講師用アプリは、登録したときと同じブラウザで使ってください。ブラウザの履歴・データを消すと登録が外れるので、そのときは登録し直してください。</p>
+    <div id="pcInfo" class="note"></div>
+    <div class="bar" style="margin-top:8px">
+      <button id="btnPcRegister" class="primary">この端末を打刻用の端末として登録</button>
+      <button id="btnPcToggle"></button>
+      <button id="btnPcClear" class="danger">登録をすべて解除</button>
+    </div>
+
     <h2>教室の位置（不正防止）</h2>
     <p class="note">教室で下のボタンを押すと、今いる場所を教室の位置として登録します。教室から離れた場所での打刻や、ほかの講師のスマホでの打刻は「要確認」に赤で表示されます（打刻自体は止めません）。許容距離は「設定」シートの「位置の許容距離(m)」で変えられます。</p>
     <div id="roomInfo" class="note"></div>
@@ -236,7 +245,7 @@ async function load() {
   $('mainView').classList.add('loading');
   showMsg('読み込み中…（数秒〜20秒ほどかかることがあります）', 'info');
   try {
-    data = await call('adminGetMonth', password, $('month').value);
+    data = await call('adminGetMonth', password, $('month').value, deviceId());
     $('msg').className = 'msg';
     render();
   } catch (e) {
@@ -244,6 +253,43 @@ async function load() {
   } finally {
     loading = false;
     $('mainView').classList.remove('loading');
+  }
+}
+
+/** この端末を見分けるための番号（講師用アプリと共通。同じブラウザなら同じ番号になる） */
+function deviceId() {
+  let d = null;
+  try { d = localStorage.getItem('deviceId'); } catch (e) {}
+  if (!d) {
+    d = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    try { localStorage.setItem('deviceId', d); } catch (e) {}
+  }
+  return d;
+}
+
+function renderPc() {
+  const pc = data.pc || { count: 0, restricted: false, thisDevice: false };
+  let html;
+  if (!pc.count) html = '打刻用のパソコンはまだ登録されていません（どの端末からでも打刻できます）';
+  else html = '登録済み：' + pc.count + '台　／　'
+    + (pc.restricted ? '<b>教室のパソコンからのみ打刻できます</b>' : '<span class="red">一時的にスマホからの打刻も許可しています</span>');
+  html += '<br>この端末：' + (pc.thisDevice ? '<b>打刻用の端末として登録済み</b>' : '未登録');
+  $('pcInfo').innerHTML = html;
+  $('btnPcRegister').hidden = pc.thisDevice;
+  $('btnPcToggle').hidden = $('btnPcClear').hidden = !pc.count;
+  $('btnPcToggle').textContent = pc.restricted ? '一時的にスマホからの打刻も許可する' : '教室のパソコンのみに戻す';
+}
+
+async function pcAction(fn, question, ...args) {
+  if (loading) return;
+  if (question && !window.confirm(question)) return;
+  showMsg('処理中です…', 'info');
+  try {
+    data.pc = await call(fn, password, ...args, deviceId());
+    renderPc();
+    showMsg('設定しました', 'ok');
+  } catch (e) {
+    showMsg(errText(e), 'err');
   }
 }
 
@@ -282,6 +328,7 @@ function registerRoom() {
 }
 
 function render() {
+  renderPc();
   renderRoom();
   // 月別集計
   let html = '<tr><th>講師</th><th>出勤日数</th><th>累計勤務</th><th>時給</th><th>給与</th><th>要確認</th></tr>';
@@ -552,6 +599,15 @@ $('showCanceled').onchange = renderPunches;
 $('btnAdd').onclick = () => openModal('add', null);
 $('btnSlipAll').onclick = () => { if (data) saveSlipsXlsx(data.summary); };
 $('btnRoom').onclick = registerRoom;
+$('btnPcRegister').onclick = () => pcAction('adminRegisterDevice',
+  'この端末を打刻用の端末として登録し、教室のパソコンからのみ打刻できるようにしますか？\n（講師のスマホからは打刻できなくなります）');
+$('btnPcToggle').onclick = () => {
+  const on = !(data.pc && data.pc.restricted);
+  pcAction('adminSetRestriction', on ? '教室のパソコンからのみ打刻できるように戻しますか？'
+    : 'パソコンの故障などのため、一時的に講師のスマホからの打刻も許可しますか？', on);
+};
+$('btnPcClear').onclick = () => pcAction('adminClearDevices',
+  '登録した打刻用の端末をすべて解除しますか？（パソコンの入れ替えなどのとき）\n解除すると、どの端末からでも打刻できるようになります。');
 $('mChips').querySelectorAll('button').forEach(b => {
   b.onclick = () => { $('mReason').value = b.textContent; };
 });

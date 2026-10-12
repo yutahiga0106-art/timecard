@@ -37,6 +37,9 @@
   .msg.info { background: #e8eef6; color: #234; }
   .undo { margin-top: 12px; padding: 12px; border: 2px dashed #999; border-radius: 10px; background: #fff; text-align: center; }
   .undo button { margin-top: 8px; font-size: 18px; padding: 10px 24px; border-radius: 8px; border: 1px solid #b71c1c; color: #b71c1c; background: #fff; }
+  .device-banner { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; text-align: center; font-size: 15px; font-weight: bold; }
+  .device-banner.pc { background: #e3f2fd; color: #0d47a1; }
+  .device-banner.ng { background: #fde2e2; color: #b71c1c; }
   .missing { margin-top: 8px; padding: 10px; border-radius: 8px; background: #fde2e2; color: #b71c1c; font-size: 15px; white-space: pre-line; }
   .pending { margin-top: 12px; padding: 12px; border: 2px solid #f0b400; border-radius: 10px; background: #fffbea; }
   .pending-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 16px; }
@@ -55,6 +58,7 @@
 <body>
 <main>
   <h1>サクラス 出退勤</h1>
+  <div class="device-banner" id="deviceBanner" hidden></div>
   <div class="clock" id="clock">--:--:--</div>
   <div class="date" id="date"></div>
 
@@ -102,6 +106,9 @@ const store = {
 };
 const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 let undo = null;
+// この端末が教室のパソコンか（shared）、打刻してよい端末か（allowed）。電波がないときは前回の結果を使う
+let appInfo = { shared: false, allowed: true };
+try { appInfo = JSON.parse(localStorage.getItem('appInfo') || 'null') || appInfo; } catch (e) {}
 let undoTimer = null;
 
 // Apps Script 上で開いたときは google.script.run、GitHub Pages などで開いたときは API_URL へ送る
@@ -159,8 +166,8 @@ function showMsg(text, kind) {
 }
 
 function setBusy(b) {
-  $('btnIn').disabled = b;
-  $('btnOut').disabled = b;
+  $('btnIn').disabled = b || !appInfo.allowed;
+  $('btnOut').disabled = b || !appInfo.allowed;
   $('btnUndo').disabled = b;
 }
 
@@ -244,6 +251,7 @@ async function flushQueue() {
         undo = { id: r.id, name: item.name, type: item.type, time: r.time, until: r.undoUntil };
         store.set('undo', JSON.stringify(undo));
         renderUndo();
+        resetTeacherLater();
       } catch (e) {
         if (e.retryable) {
           showMsg('電波が悪く、まだ送れていません。\n' + hhmm(item.at) + ' の' + item.type
@@ -302,13 +310,45 @@ async function doPunch(type) {
   setBusy(true);
   try {
     showMsg('位置情報を確認しています…（' + hhmm(at) + ' の' + type + 'として記録します）', 'info');
-    const loc = await getLocation();
+    // 教室のパソコンは場所が決まっているので位置情報は取らない
+    const loc = appInfo.shared ? {} : await getLocation();
     saveQueue(loadQueue().map(x => x.id === id ? Object.assign(x, loc, { ready: true }) : x));
     showMsg('送信中…（' + hhmm(at) + ' の' + type + 'として記録します）', 'info');
     await flushQueue();
   } finally {
     setBusy(false);
   }
+}
+
+/** 教室のパソコン／打刻できない端末の表示 */
+function applyAppInfo() {
+  const b = $('deviceBanner');
+  if (appInfo.shared) {
+    b.textContent = '教室のパソコン（打刻用）';
+    b.className = 'device-banner pc';
+    b.hidden = false;
+    store.del('teacher');
+  } else if (!appInfo.allowed) {
+    b.textContent = 'この端末では打刻できません。' + String.fromCharCode(10) + '打刻は教室のパソコンで行ってください。';
+    b.style.whiteSpace = 'pre-line';
+    b.className = 'device-banner ng';
+    b.hidden = false;
+  } else {
+    b.hidden = true;
+  }
+  setBusy(false);
+}
+
+/** 教室のパソコンでは、打刻のあと講師名を「選んでください」に戻す（次の人が前の人の名前で押さないように） */
+let resetTimer = null;
+function resetTeacherLater() {
+  if (!appInfo.shared) return;
+  clearTimeout(resetTimer);
+  resetTimer = setTimeout(() => {
+    $('teacher').value = '';
+    refreshStatus();
+    renderUndo();
+  }, 10000);
 }
 
 /** この端末を見分けるための番号（初回に作ってスマホに保存。個人情報は含まない） */
@@ -360,7 +400,7 @@ async function doUndo() {
   setBusy(true);
   showMsg('取り消し中…', 'info');
   try {
-    await call('cancelPunch', u.name, u.id);
+    await call('cancelPunch', u.name, u.id, deviceId());
     showMsg(u.time + ' の' + u.type + 'を取り消しました', 'ok');
     undo = null;
     store.del('undo');
@@ -386,10 +426,17 @@ function init() {
   $('btnOut').onclick = () => doPunch('退勤');
   $('btnUndo').onclick = doUndo;
   $('teacher').onchange = () => {
-    store.set('teacher', $('teacher').value);
+    if (!appInfo.shared) store.set('teacher', $('teacher').value);
     refreshStatus();
     renderUndo();
   };
+
+  applyAppInfo();
+  call('getAppInfo', deviceId()).then(info => {
+    appInfo = info;
+    try { localStorage.setItem('appInfo', JSON.stringify(info)); } catch (e) {}
+    applyAppInfo();
+  }).catch(() => {});
 
   renderPending();
   flushQueue();
@@ -415,7 +462,7 @@ function init() {
     sel.add(new Option('選んでください', ''));
     names.forEach(n => sel.add(new Option(n, n)));
     const saved = store.get('teacher');
-    if (saved && names.indexOf(saved) >= 0) sel.value = saved;
+    if (!appInfo.shared && saved && names.indexOf(saved) >= 0) sel.value = saved;
     refreshStatus();
     renderUndo();
   }).catch(e => showMsg(errText(e), 'err'));
