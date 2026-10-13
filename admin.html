@@ -32,6 +32,14 @@
   .msg.info { background: #e8eef6; }
   .scroll { overflow-x: auto; background: #fff; border-radius: 8px; }
   td.checks { white-space: normal; font-size: 13px; min-width: 160px; }
+  td.pcell { vertical-align: top; min-width: 150px; }
+  td.pcell .ptime { font-size: 17px; font-weight: bold; margin-right: 4px; }
+  td.pcell .dist { font-size: 12px; color: #666; margin-left: 4px; }
+  td.pcell .checks { color: #b71c1c; font-size: 12px; white-space: normal; margin-top: 2px; }
+  td.pcell .ops { margin-top: 4px; }
+  td.pcell.warn { background: #fdecea; }
+  td.pcell.empty { color: #999; }
+  .badge.pc { background: #e3f2fd; color: #0d47a1; }
   #printArea { display: none; }
   @media print {
     body { background: #fff; }
@@ -513,36 +521,81 @@ async function confirmProvisional(name, x) {
   }
 }
 
-function renderPunches() {
-  const showCanceled = $('showCanceled').checked;
-  let html = '<tr><th>日付</th><th>時刻</th><th>講師</th><th>種別</th><th>状態</th><th>教室から</th><th>要確認</th><th>操作</th></tr>';
-  // 新しい打刻を上に表示する（サーバーからは古い順に届く）
-  const list = data.punches.filter(p => showCanceled || p.status !== '取消').slice().reverse();
-  if (!list.length) html += '<tr><td colspan="8">この月の打刻はありません</td></tr>';
+/** 有効な打刻を、講師・日ごとに「出勤〜退勤」の組にする（新しい順） */
+function pairPunches(list) {
+  const groups = {};
   list.forEach(p => {
-    const canceled = p.status === '取消';
-    const checks = canceled ? [] : (p.checks || []);
-    const dist = p.distance === null || p.distance === undefined ? '' : p.distance >= 1000 ? (p.distance / 1000).toFixed(1) + 'km' : p.distance + 'm';
-    html += '<tr class="' + (canceled ? 'canceled' : '') + (checks.length ? ' alert' : '') + '">'
-      + '<td>' + esc(p.date) + '</td><td>' + esc(p.time) + '</td><td>' + esc(p.name) + '</td><td>' + esc(p.type) + '</td>'
-      + '<td class="st">' + esc(p.status) + (p.edited ? '<span class="badge">' + esc(p.edited) + '</span>' : '') + '</td>'
-      + '<td class="num">' + esc(dist) + '</td>'
-      + '<td class="checks">' + checks.map(esc).join('<br>') + '</td>'
-      + '<td class="ops">'
-      + (canceled
-        ? '<button class="small" data-op="restore" data-id="' + esc(p.id) + '">元に戻す</button>'
-        : '<button class="small" data-op="edit" data-id="' + esc(p.id) + '">修正</button>'
-          + '<button class="small danger" data-op="cancel" data-id="' + esc(p.id) + '">取消</button>')
-      + '</td></tr>';
+    const k = p.dt.slice(0, 10) + '|' + p.name;
+    (groups[k] = groups[k] || []).push(p);
   });
+  const rows = [];
+  Object.keys(groups).forEach(k => {
+    let open = null;
+    groups[k].forEach(p => {
+      if (p.type === '出勤') {
+        if (open) rows.push({ in: open, out: null });
+        open = p;
+      } else if (open) {
+        rows.push({ in: open, out: p });
+        open = null;
+      } else {
+        rows.push({ in: null, out: p });
+      }
+    });
+    if (open) rows.push({ in: open, out: null });
+  });
+  const key = r => (r.in || r.out).dt;
+  return rows.sort((a, b) => key(a) < key(b) ? 1 : key(a) > key(b) ? -1 : 0);
+}
+
+/** 出勤・退勤それぞれのセル（時刻・バッジ・要確認・ボタン）。打刻がなければ「＋追加」 */
+function punchCell(p, row, type) {
+  if (!p) {
+    const other = row.in || row.out;
+    return '<td class="pcell empty">—<br><button class="small" data-add="' + esc(type) + '" data-name="' + esc(other.name)
+      + '" data-day="' + esc(other.dt.slice(0, 10)) + '">＋追加</button></td>';
+  }
+  const checks = p.checks || [];
+  const dist = p.distance === null || p.distance === undefined ? '' : p.distance >= 1000 ? (p.distance / 1000).toFixed(1) + 'km' : p.distance + 'm';
+  return '<td class="pcell' + (checks.length ? ' warn' : '') + '"><span class="ptime">' + esc(p.time) + '</span>'
+    + (p.edited ? '<span class="badge">' + esc(p.edited) + '</span>' : '')
+    + (p.byPc ? '<span class="badge pc">教室PC</span>' : dist ? '<span class="dist">教室から' + esc(dist) + '</span>' : '')
+    + (checks.length ? '<div class="checks">' + checks.map(esc).join('<br>') + '</div>' : '')
+    + '<div class="ops"><button class="small" data-op="edit" data-id="' + esc(p.id) + '">修正</button>'
+    + '<button class="small danger" data-op="cancel" data-id="' + esc(p.id) + '">取消</button></div></td>';
+}
+
+function renderPunches() {
+  const rows = pairPunches(data.punches.filter(p => p.status !== '取消'));
+  let html = '<tr><th>日付</th><th>講師</th><th>出勤</th><th>退勤</th></tr>';
+  if (!rows.length) html += '<tr><td colspan="4">この月の打刻はありません</td></tr>';
+  rows.forEach(r => {
+    const base = r.in || r.out;
+    html += '<tr' + (!r.in || !r.out ? ' class="alert"' : '') + '><td>' + esc(base.date) + '</td><td>' + esc(base.name) + '</td>'
+      + punchCell(r.in, r, '出勤') + punchCell(r.out, r, '退勤') + '</tr>';
+  });
+
+  // 取り消した打刻は下に別に表示する
+  const canceled = $('showCanceled').checked ? data.punches.filter(p => p.status === '取消').slice().reverse() : [];
+  if (canceled.length) {
+    html += '<tr><th colspan="4">取り消した打刻</th></tr>';
+    canceled.forEach(p => {
+      html += '<tr class="canceled"><td>' + esc(p.date) + '</td><td>' + esc(p.name) + '</td>'
+        + '<td>' + esc(p.type) + '　' + esc(p.time) + (p.edited ? '<span class="badge">' + esc(p.edited) + '</span>' : '') + '</td>'
+        + '<td class="ops"><button class="small" data-op="restore" data-id="' + esc(p.id) + '">元に戻す</button></td></tr>';
+    });
+  }
   $('punches').innerHTML = html;
   $('punches').querySelectorAll('button[data-op]').forEach(b => {
     b.onclick = () => openModal(b.dataset.op, data.punches.find(p => p.id === b.dataset.id));
   });
+  $('punches').querySelectorAll('button[data-add]').forEach(b => {
+    b.onclick = () => openModal('add', null, { name: b.dataset.name, day: b.dataset.day, type: b.dataset.add });
+  });
 }
 
 /** op: add / edit / cancel / restore */
-function openModal(op, p) {
+function openModal(op, p, prefill) {
   if (loading) return;
   const titles = { add: '打刻を追加', edit: '打刻を修正', cancel: '打刻を取消', restore: '取消を元に戻す' };
   const done = { add: '打刻を追加しました', edit: '打刻を修正しました', cancel: '打刻を取消しました', restore: '取消を元に戻しました' };
@@ -559,6 +612,12 @@ function openModal(op, p) {
     if (openName && data.teachers.indexOf(openName) >= 0) $('mName').value = openName;
     $('mDt').value = $('month').value + '-01T21:00';
     $('mType').value = '退勤';
+    // 打刻一覧の「＋追加」から開いたときは、講師・日付・種別を入れておく（時刻は時間割の目安）
+    if (prefill) {
+      if (data.teachers.indexOf(prefill.name) >= 0) $('mName').value = prefill.name;
+      $('mDt').value = prefill.day + (prefill.type === '出勤' ? 'T18:30' : 'T21:30');
+      $('mType').value = prefill.type;
+    }
   } else if (op === 'edit') {
     $('mDt').value = p.dt;
     $('mType').value = p.type;
