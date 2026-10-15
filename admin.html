@@ -40,6 +40,21 @@
   td.pcell.warn { background: #fdecea; }
   td.pcell.empty { color: #999; }
   td.pcell.num { text-align: right; min-width: 110px; }
+  .dialog.wide { max-width: 520px; max-height: 92vh; overflow-y: auto; }
+  .dialog { max-height: 92vh; overflow-y: auto; }
+  .cal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal .dow { text-align: center; font-size: 12px; color: #666; }
+  .cal button { padding: 8px 0; font-size: 15px; border-radius: 8px; }
+  .cal button.sel { background: #1e88e5; color: #fff; border-color: #1e88e5; }
+  .cal button.off { color: #bbb; }
+  .cal button.sel.off { color: #fff; }
+  .dialog .radios label { display: flex; align-items: center; font-size: 15px; color: #222; margin: 4px 0; }
+  .dialog .radios input { width: auto; margin-right: 6px; }
+  .times { margin: 6px 0; font-size: 15px; }
+  .dialog .times input { width: auto; }
+  .preview { margin-top: 8px; font-size: 13px; background: #f4f6f8; border-radius: 8px; padding: 8px; white-space: pre-line; max-height: 160px; overflow-y: auto; }
+  .preview:empty { display: none; }
   td.pcell .note { font-size: 12px; color: #666; white-space: normal; }
   .badge.pc { background: #e3f2fd; color: #0d47a1; }
   #printArea { display: none; }
@@ -118,7 +133,7 @@
 
     <h2>打刻一覧（修正・追加・取消）</h2>
     <div class="bar" style="margin-bottom:8px">
-      <button id="btnAdd">＋ 打刻を追加</button>
+      <button id="btnAdd" class="primary">＋ 勤務を追加（出勤・退勤）</button>
       <label class="note"><input type="checkbox" id="showCanceled" checked> 取消も表示</label>
     </div>
     <div class="scroll"><table id="punches"></table></div>
@@ -143,6 +158,59 @@
 
 <!-- 給与明細の印刷用（印刷するときだけ表示） -->
 <div id="printArea"></div>
+
+<!-- 勤務の追加（出勤と退勤をまとめて、複数の日に） -->
+<div class="modal" id="shiftModal" hidden>
+  <div class="dialog wide">
+    <h3>勤務を追加（出勤・退勤）</h3>
+    <label for="sName">講師</label><select id="sName"></select>
+    <label>日付（押して選ぶ・複数選べます）</label>
+    <div class="cal-head"><button type="button" class="small" id="sPrev">◀</button><b id="sMonthLabel"></b><button type="button" class="small" id="sNext">▶</button></div>
+    <div class="cal" id="sCal"></div>
+    <label>時刻</label>
+    <div class="radios">
+      <label><input type="radio" name="sMode" value="tt" checked> 時間割どおり（曜日ごとの開始・終了）</label>
+      <label><input type="radio" name="sMode" value="fix"> 時刻を指定</label>
+    </div>
+    <div class="times" id="sTimes" hidden>
+      出勤 <input type="time" id="sIn" value="18:30">　退勤 <input type="time" id="sOut" value="21:30">
+      <div class="note">片方を空にすると、ある方だけ追加します</div>
+    </div>
+    <div class="preview" id="sPreview"></div>
+    <label for="sReason">理由（任意）</label>
+    <div class="chips" id="sChips">
+      <button type="button">打刻の押し忘れ</button><button type="button">端末の不具合</button><button type="button">テスト</button>
+    </div>
+    <input id="sReason" type="text" placeholder="ボタンで選ぶか、自由に入力（空欄でも可）">
+    <div class="msg" id="sMsg"></div>
+    <div class="dbtns">
+      <button id="sCancel">やめる</button>
+      <button id="sOk" class="primary">追加する</button>
+    </div>
+  </div>
+</div>
+
+<!-- 給与時間の調整（打刻の記録は変えずに、給与に入れる時間だけ決める） -->
+<div class="modal" id="payModal" hidden>
+  <div class="dialog">
+    <h3>給与時間を調整</h3>
+    <div id="pInfo" class="note"></div>
+    <label>給与に入れる時間</label>
+    <div class="times">開始 <input type="time" id="pFrom">　〜　終了 <input type="time" id="pTo"></div>
+    <div class="note" id="pMinutes"></div>
+    <label for="pReason">理由（任意）</label>
+    <div class="chips" id="pChips">
+      <button type="button">面談</button><button type="button">授業準備</button><button type="button">片付け</button><button type="button">早く来ただけ</button>
+    </div>
+    <input id="pReason" type="text" placeholder="ボタンで選ぶか、自由に入力（空欄でも可）">
+    <div class="msg" id="pMsg"></div>
+    <div class="dbtns">
+      <button id="pClear" class="danger">調整を解除</button>
+      <button id="pCancel">やめる</button>
+      <button id="pOk" class="primary">保存</button>
+    </div>
+  </div>
+</div>
 
 <div class="modal" id="modal" hidden>
   <div class="dialog">
@@ -576,10 +644,152 @@ function shiftFor(r) {
 
 function workCell(r) {
   const x = shiftFor(r);
-  if (!x || !x.inTime || !x.outTime) return '<td class="pcell num">' + (x && x.issue === '勤務中' ? '勤務中' : '—') + '</td>';
+  if (!x || x.issue === '勤務中') return '<td class="pcell num">' + (x ? '勤務中' : '—') + '</td>';
+  const btn = '<div class="ops" style="justify-content:flex-end"><button class="small" data-pay="' + esc(x.key) + '" data-name="'
+    + esc((r.in || r.out).name) + '">給与時間を調整</button></div>';
+  if (!x.inTime || !x.outTime) return '<td class="pcell num">—' + btn + '</td>';
   return '<td class="pcell num"><span class="ptime">' + hm(x.minutes) + '</span>'
-    + (x.provisional ? '<div class="note">' + esc(x.provisional) + 'は仮の時刻（' + esc(x.provisional === '退勤' ? x.outTime : x.inTime) + '）で計算</div>' : '')
-    + (x.payNote ? '<div class="note">' + esc(x.payNote) + '</div>' : '') + '</td>';
+    + (x.adjusted ? '<div class="note"><b>' + esc(x.adjusted) + '</b></div>'
+      : (x.provisional ? '<div class="note">' + esc(x.provisional) + 'は仮の時刻（' + esc(x.provisional === '退勤' ? x.outTime : x.inTime) + '）で計算</div>' : '')
+        + (x.payNote ? '<div class="note">' + esc(x.payNote) + '</div>' : ''))
+    + btn + '</td>';
+}
+
+// ───── 勤務の追加（出勤・退勤をまとめて、複数の日に） ─────
+const NL = String.fromCharCode(10);
+const DOW_JA = ['日', '月', '火', '水', '木', '金', '土'];
+let sYm = null;          // カレンダーに出している月 'yyyy-MM'
+let sDays = {};          // 選んだ日 'yyyy-MM-dd' → true
+
+function pad2(n) { return ('0' + n).slice(-2); }
+
+function openShiftModal(prefill) {
+  if (loading) return;
+  $('sName').innerHTML = '';
+  data.teachers.forEach(n => $('sName').add(new Option(n, n)));
+  const name = (prefill && prefill.name) || openName;
+  if (name && data.teachers.indexOf(name) >= 0) $('sName').value = name;
+  sYm = $('month').value;
+  sDays = {};
+  if (prefill && prefill.day) { sDays[prefill.day] = true; sYm = prefill.day.slice(0, 7); }
+  $('sReason').value = '';
+  $('sMsg').className = 'msg';
+  renderCal();
+  $('shiftModal').hidden = false;
+}
+
+function renderCal() {
+  const [y, m] = sYm.split('-').map(Number);
+  $('sMonthLabel').textContent = y + '年' + m + '月';
+  const first = new Date(y, m - 1, 1).getDay();
+  const last = new Date(y, m, 0).getDate();
+  let html = DOW_JA.map(d => '<div class="dow">' + d + '</div>').join('');
+  for (let i = 0; i < first; i++) html += '<div></div>';
+  for (let d = 1; d <= last; d++) {
+    const key = sYm + '-' + pad2(d);
+    const dow = DOW_JA[new Date(y, m - 1, d).getDay()];
+    html += '<button type="button" data-day="' + key + '" class="' + (sDays[key] ? 'sel' : '')
+      + (data.timetable && data.timetable[dow] ? '' : ' off') + '">' + d + '</button>';
+  }
+  $('sCal').innerHTML = html;
+  $('sCal').querySelectorAll('button[data-day]').forEach(b => {
+    b.onclick = () => {
+      if (sDays[b.dataset.day]) delete sDays[b.dataset.day]; else sDays[b.dataset.day] = true;
+      renderCal();
+    };
+  });
+  renderShiftPreview();
+}
+
+/** 選んだ日と時刻から、追加する内容を作る（時間割どおりのときは曜日ごとの開始・終了） */
+function shiftEntries() {
+  const mode = document.querySelector('input[name="sMode"]:checked').value;
+  $('sTimes').hidden = mode !== 'fix';
+  const entries = [], skipped = [];
+  Object.keys(sDays).sort().forEach(day => {
+    const [y, m, d] = day.split('-').map(Number);
+    const dow = DOW_JA[new Date(y, m - 1, d).getDay()];
+    const label = m + '/' + d + '(' + dow + ')';
+    if (mode === 'tt') {
+      const tt = data.timetable && data.timetable[dow];
+      if (!tt) { skipped.push(label); return; }
+      entries.push({ day: day, in: tt.startStr, out: tt.endStr, label: label });
+    } else {
+      entries.push({ day: day, in: $('sIn').value, out: $('sOut').value, label: label });
+    }
+  });
+  return { entries: entries, skipped: skipped };
+}
+
+function renderShiftPreview() {
+  const r = shiftEntries();
+  let t = r.entries.map(e => e.label + '　出勤 ' + (e.in || '—') + '　退勤 ' + (e.out || '—')).join(NL);
+  if (r.skipped.length) t += (t ? NL : '') + '※ 時間割のない日（' + r.skipped.join('、') + '）は「時刻を指定」で追加してください';
+  $('sPreview').textContent = r.entries.length || r.skipped.length ? '追加する内容（' + r.entries.length + '日）' + NL + t : '';
+}
+
+async function saveShifts() {
+  const r = shiftEntries();
+  const msg = (t, kind) => { $('sMsg').textContent = t; $('sMsg').className = 'msg show ' + (kind || 'err'); };
+  if (!r.entries.length) return msg('追加する日を選んでください');
+  if (r.skipped.length) return msg('時間割のない日が含まれています。「時刻を指定」にするか、その日を外してください');
+  $('sOk').disabled = $('sCancel').disabled = true;
+  msg('追加しています。画面を閉じずにお待ちください（数秒〜20秒ほどかかることがあります）', 'info');
+  try {
+    const res = await call('adminAddShifts', password, $('sName').value,
+      r.entries.map(e => ({ day: e.day, in: e.in, out: e.out })), $('sReason').value.trim());
+    $('shiftModal').hidden = true;
+    await load();
+    showMsg($('sName').value + ' さんの勤務を ' + res.days + '日分 追加しました（修正履歴シートに記録しました）', 'ok');
+  } catch (e) {
+    msg(errText(e));
+  } finally {
+    $('sOk').disabled = $('sCancel').disabled = false;
+  }
+}
+
+// ───── 給与時間の調整 ─────
+function openPayModal(key, name) {
+  if (loading) return;
+  const s = data.summary.find(v => v.name === name);
+  const x = s && s.shifts.find(v => v.key === key);
+  if (!x) return;
+  const dow = x.date.slice(-2, -1);
+  const tt = data.timetable && data.timetable[dow];
+  $('pInfo').textContent = name + ' さん　' + x.date + '　打刻：出勤 ' + (x.inTime || '—') + '　退勤 ' + (x.outTime || '—')
+    + '（打刻の記録は変わりません）';
+  $('pFrom').value = x.payFrom || (tt ? tt.startStr : '');
+  $('pTo').value = x.payTo || (tt ? tt.endStr : '');
+  $('pReason').value = '';
+  $('pClear').hidden = !x.adjusted;
+  $('pMsg').className = 'msg';
+  const showMin = () => {
+    const a = $('pFrom').value, b = $('pTo').value;
+    if (!a || !b) { $('pMinutes').textContent = ''; return; }
+    const m = (Number(b.slice(0, 2)) * 60 + Number(b.slice(3))) - (Number(a.slice(0, 2)) * 60 + Number(a.slice(3)));
+    $('pMinutes').textContent = m > 0 ? '給与に入る時間：' + hm(m) : '終了は開始より後の時刻にしてください';
+  };
+  $('pFrom').oninput = $('pTo').oninput = showMin;
+  showMin();
+  const send = async (from, to) => {
+    const msg = (t, kind) => { $('pMsg').textContent = t; $('pMsg').className = 'msg show ' + (kind || 'err'); };
+    $('pOk').disabled = $('pCancel').disabled = $('pClear').disabled = true;
+    msg('保存しています…（数秒〜20秒ほどかかることがあります）', 'info');
+    try {
+      await call('adminSetPayTime', password, key, name, x.day, from, to, $('pReason').value.trim());
+      $('payModal').hidden = true;
+      await load();
+      showMsg(from ? x.date + ' の給与時間を ' + from + '〜' + to + ' にしました' : x.date + ' の給与時間の調整を解除しました', 'ok');
+    } catch (e) {
+      msg(errText(e));
+    } finally {
+      $('pOk').disabled = $('pCancel').disabled = $('pClear').disabled = false;
+    }
+  };
+  $('pOk').onclick = () => send($('pFrom').value, $('pTo').value);
+  $('pClear').onclick = () => { if (window.confirm('給与時間の調整を解除して、打刻どおりの計算に戻しますか？')) send('', ''); };
+  $('pCancel').onclick = () => { $('payModal').hidden = true; };
+  $('payModal').hidden = false;
 }
 
 function renderPunches() {
@@ -605,6 +815,9 @@ function renderPunches() {
   $('punches').innerHTML = html;
   $('punches').querySelectorAll('button[data-op]').forEach(b => {
     b.onclick = () => openModal(b.dataset.op, data.punches.find(p => p.id === b.dataset.id));
+  });
+  $('punches').querySelectorAll('button[data-pay]').forEach(b => {
+    b.onclick = () => openPayModal(b.dataset.pay, b.dataset.name);
   });
   $('punches').querySelectorAll('button[data-add]').forEach(b => {
     b.onclick = () => openModal('add', null, { name: b.dataset.name, day: b.dataset.day, type: b.dataset.add });
@@ -672,7 +885,25 @@ $('pw').onkeydown = e => { if (e.key === 'Enter') login(); };
 $('btnLoad').onclick = load;
 $('month').onchange = load;
 $('showCanceled').onchange = renderPunches;
-$('btnAdd').onclick = () => openModal('add', null);
+$('btnAdd').onclick = () => openShiftModal(null);
+$('sPrev').onclick = () => {
+  const [y, m] = sYm.split('-').map(Number);
+  const d = new Date(y, m - 2, 1);
+  sYm = d.getFullYear() + '-' + pad2(d.getMonth() + 1);
+  renderCal();
+};
+$('sNext').onclick = () => {
+  const [y, m] = sYm.split('-').map(Number);
+  const d = new Date(y, m, 1);
+  sYm = d.getFullYear() + '-' + pad2(d.getMonth() + 1);
+  renderCal();
+};
+document.querySelectorAll('input[name="sMode"]').forEach(r => { r.onchange = renderShiftPreview; });
+$('sIn').oninput = $('sOut').oninput = renderShiftPreview;
+$('sOk').onclick = saveShifts;
+$('sCancel').onclick = () => { $('shiftModal').hidden = true; };
+$('sChips').querySelectorAll('button').forEach(b => { b.onclick = () => { $('sReason').value = b.textContent; }; });
+$('pChips').querySelectorAll('button').forEach(b => { b.onclick = () => { $('pReason').value = b.textContent; }; });
 $('btnSlipAll').onclick = () => { if (data) saveSlipsXlsx(data.summary); };
 $('btnRoom').onclick = registerRoom;
 $('btnPcRegister').onclick = () => pcAction('adminRegisterDevice',
